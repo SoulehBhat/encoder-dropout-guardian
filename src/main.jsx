@@ -15,12 +15,29 @@ function App() {
   const [running, setRunning] = useState(false);
   const [sample, setSample] = useState(null);
   const [faults, setFaults] = useState([]);
+  const [recordedData, setRecordedData] = useState([]);
+  const [recordedIndex, setRecordedIndex] = useState(0);
+  const [dataError, setDataError] = useState("");
   const [loggedIn, setLoggedIn] = useState(() => localStorage.getItem("encoderGuardianLoggedIn") === "true");
 
   useEffect(() => {
     const onHash = () => setPage(location.hash.slice(1) || "home");
     addEventListener("hashchange", onHash);
     return () => removeEventListener("hashchange", onHash);
+  }, []);
+
+  useEffect(() => {
+    fetch("/data/motor-data.csv")
+      .then((response) => {
+        if (!response.ok) throw new Error(`Recorded motor data could not be loaded (${response.status}).`);
+        return response.text();
+      })
+      .then((text) => {
+        const rows = parseMotorCsv(text);
+        setRecordedData(rows);
+        setRecordedIndex(Math.max(0, rows.findIndex((row) => row.PWM > 0 && row.Current > 0.8)));
+      })
+      .catch((error) => setDataError(error.message));
   }, []);
 
   useEffect(() => {
@@ -31,8 +48,23 @@ function App() {
 
   const takeSample = () => {
     const base = scenarios[scenario];
-    const current = scenario === "normal" ? Math.max(0, base.pps + Math.round((Math.random() * 10) - 5)) : base.pps;
-    const next = { ...base, pps: current, time: new Date() };
+    let next;
+    if (scenario === "normal" && recordedData.length) {
+      const source = recordedData[recordedIndex % recordedData.length];
+      setRecordedIndex((index) => (index + 1) % recordedData.length);
+      next = {
+        ...base,
+        command: source.commandPercent,
+        current: source.Current,
+        pps: Math.abs(source.Velocity),
+        encoderCount: source.encoderCount,
+        sourceTime: source.time,
+        dataSource: "Recorded sample data",
+        time: new Date(),
+      };
+    } else {
+      next = { ...base, pps: scenario === "normal" ? base.pps : base.pps, dataSource: "Simulated data", time: new Date() };
+    }
     setSample(next);
     if (scenario === "dropout") {
       setFaults((items) => [{ time: next.time, confidence: 78 }, ...items].slice(0, 25));
@@ -96,10 +128,10 @@ function App() {
         </div>
       </header>
 
-      {page === "home" && <Home navigate={navigate} />}
+      {page === "home" && <Home navigate={navigate} recordedData={recordedData} />}
       {page === "how-it-works" && <InfoPage title="How it works" kicker="THE DETECTION MODEL" text="It is not enough to see zero pulses. The Guardian asks whether zero pulses make sense." />}
       {page === "features" && <InfoPage title="Features that make faults easier to trust." kicker="BUILT FOR CLARITY" text="A focused monitoring toolkit for prototyping, validation, and operator conversations." />}
-      {page === "monitor" && <Monitor scenario={scenario} setScenario={setScenario} running={running} setRunning={setRunning} takeSample={takeSample} sample={sample} assessment={assessment} />}
+      {page === "monitor" && <Monitor scenario={scenario} setScenario={setScenario} running={running} setRunning={setRunning} takeSample={takeSample} sample={sample} assessment={assessment} recordedData={recordedData} dataError={dataError} />}
       {page === "history" && <History faults={faults} />}
       {page === "settings" && <Settings />}
       {page === "about" && <About />}
@@ -110,22 +142,36 @@ function App() {
   );
 }
 
-function Home({ navigate }) {
-  return <main className="page-view active react-page home-react"><div className="hero hero-home"><div className="hero-copy"><span className="kicker">MOTION INTEGRITY / 01</span><h1>Know when the motor moves but the encoder goes quiet.</h1><p className="lead">Encoder Dropout Guardian watches command, current, and pulse signals together to surface feedback faults before they become mysterious motion problems.</p><div className="hero-actions"><button className="button button-primary home-monitor-button" onClick={() => navigate("monitor")}><span className="button-inner">Open live monitor →</span></button><a className="text-link" href="#how-it-works">See how it works ↗</a></div><div className="hero-trust"><span>✓ Simulation-ready</span><span>✓ Confidence scored</span><span>✓ No motor control output</span></div></div><SignalPreview /></div><div className="section-intro"><div><span className="kicker">A SIMPLE SIGNAL STORY</span><h2>Three signals. One clearer answer.</h2></div><p>When a motor is commanded and drawing current, it should produce encoder pulses. If those pulses stop or become irregular, the Guardian makes the mismatch visible.</p></div><section className="home-detail-grid"><article><span className="kicker">01 / INTENT</span><h2>Command says the motor should move.</h2><p>A run command or duty level establishes the expected behavior. It is the first part of the context, not proof of movement by itself.</p></article><article><span className="kicker">02 / ENERGY</span><h2>Current says the drive is engaged.</h2><p>Current remaining present while a command is active suggests the motor is energized. Together, command and current make missing feedback meaningful.</p></article><article><span className="kicker">03 / FEEDBACK</span><h2>Encoder pulses provide the movement witness.</h2><p>A steady pulse stream supports a normal run. A sudden pause or irregular stream raises a possible dropout for inspection.</p></article></section><section className="home-callout"><div><span className="kicker">WHAT YOU CAN TEST</span><h2>Compare normal, dropout, and stopped conditions.</h2><p>Use the simulator to see why zero pulses are not automatically a fault. A stopped motor has low command and low current; a dropout keeps command and current present while feedback disappears.</p></div><div className="home-callout-stats"><div><strong>80%</strong><span>sample command</span></div><div><strong>6.4 A</strong><span>sample current</span></div><div><strong>0 pps</strong><span>dropout feedback</span></div></div></section></main>;
+function parseMotorCsv(text) {
+  const [headerLine, ...lines] = text.trim().split(/\r?\n/);
+  const headers = headerLine.split(",");
+  return lines.map((line) => {
+    const values = line.split(",");
+    const row = Object.fromEntries(headers.map((header, index) => [header, Number(values[index])]));
+    return { ...row, commandPercent: (row.PWM / 255) * 100 };
+  }).filter((row) => Number.isFinite(row.time));
 }
 
-function SignalPreview() {
+function Home({ navigate, recordedData }) {
+  return <main className="page-view active react-page home-react"><div className="hero hero-home"><div className="hero-copy"><span className="kicker">MOTION INTEGRITY / 01</span><h1>Know when the motor moves but the encoder goes quiet.</h1><p className="lead">Encoder Dropout Guardian watches command, current, and pulse signals together to surface feedback faults before they become mysterious motion problems.</p><div className="hero-actions"><button className="button button-primary home-monitor-button" onClick={() => navigate("monitor")}><span className="button-inner">Open live monitor →</span></button><a className="text-link" href="#how-it-works">See how it works ↗</a></div><div className="hero-trust"><span>✓ Recorded sample data</span><span>✓ Confidence scored</span><span>✓ No motor control output</span></div></div><SignalPreview recordedData={recordedData} /></div><div className="section-intro"><div><span className="kicker">A SIMPLE SIGNAL STORY</span><h2>Three signals. One clearer answer.</h2></div><p>Recorded motor readings provide the normal reference. A separate simulated dropout removes encoder activity while keeping command and current present.</p></div><section className="home-detail-grid"><article><span className="kicker">01 / INTENT</span><h2>Command says the motor should move.</h2><p>The recorded <strong>PWM</strong> column is displayed as command percentage. It establishes expected behavior, not proof of shaft movement.</p></article><article><span className="kicker">02 / ENERGY</span><h2>Current says the drive is engaged.</h2><p>The recorded <strong>Current</strong> column shows motor current. It remains visible in the simulated dropout scenario.</p></article><article><span className="kicker">03 / FEEDBACK</span><h2>Encoder data provides the movement witness.</h2><p>The recorded <strong>encoderCount</strong> column is shown as encoder activity. In simulated dropout mode, that activity is deliberately removed.</p></article></section><section className="home-callout"><div><span className="kicker">WHAT YOU CAN TEST</span><h2>Compare recorded data with a simulated fault.</h2><p>Recorded sample data is not live motor data. Choose the separate simulated dropout mode in Live Monitor to see encoder pulses disappear while the recorded command and current context continues.</p></div><div className="home-callout-stats"><div><strong>{recordedData.length || "—"}</strong><span>recorded rows loaded</span></div><div><strong>PWM</strong><span>command source</span></div><div><strong>Current</strong><span>energy source</span></div></div></section></main>;
+}
+
+function SignalPreview({ recordedData }) {
   const [mode, setMode] = useState("normal");
   const isDropout = mode === "dropout";
-  const pulseBars = isDropout ? [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0] : [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+  const recordedPoint = recordedData.find((row) => row.PWM > 0 && row.Current > 0.8) || recordedData[0];
+  const command = recordedPoint ? recordedPoint.commandPercent : 0;
+  const current = recordedPoint ? recordedPoint.Current : 0;
+  const encoderCount = recordedPoint ? recordedPoint.encoderCount : 0;
+  const pulseBars = isDropout ? [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0] : Array.from({ length: 12 }, (_, index) => Math.abs(encoderCount + index) % 3 !== 0 ? 1 : 0);
 
   return <div className={`signal-preview ${isDropout ? "preview-dropout" : ""}`}>
-    <div className="preview-heading"><div><span className="kicker">LIVE SIGNAL PREVIEW</span><strong>{isDropout ? "Possible encoder dropout" : "Normal motor run"}</strong></div><span className={`preview-status ${isDropout ? "preview-status-fault" : ""}`}><i />{isDropout ? "Fault" : "Healthy"}</span></div>
+    <div className="preview-heading"><div><span className="kicker">{isDropout ? "SIMULATED DROPOUT" : "RECORDED SAMPLE DATA"}</span><strong>{isDropout ? "Possible encoder dropout" : "Recorded motor sample"}</strong></div><span className={`preview-status ${isDropout ? "preview-status-fault" : ""}`}><i />{isDropout ? "Simulated" : "Recorded"}</span></div>
     <div className="preview-plot" aria-label="Animated motor command, current, and encoder pulse visualization">
       <div className="plot-grid" />
-      <div className="plot-row plot-command"><span>CMD</span><div className="plot-line"><b /></div><strong>80%</strong></div>
-      <div className="plot-row plot-current"><span>AMP</span><div className="plot-line"><b /></div><strong>6.4 A</strong></div>
-      <div className="plot-row plot-pulses"><span>ENC</span><div className="pulse-preview">{pulseBars.map((active, index) => <i className={active ? "pulse-on" : "pulse-off"} style={{ "--pulse-delay": `${index * 90}ms` }} key={index} />)}</div><strong>{isDropout ? "0 pps" : "120 pps"}</strong></div>
+      <div className="plot-row plot-command"><span>PWM</span><div className="plot-line"><b /></div><strong>{command.toFixed(1)}%</strong></div>
+      <div className="plot-row plot-current"><span>AMP</span><div className="plot-line"><b /></div><strong>{current.toFixed(2)} A</strong></div>
+      <div className="plot-row plot-pulses"><span>ENC</span><div className="pulse-preview">{pulseBars.map((active, index) => <i className={active ? "pulse-on" : "pulse-off"} style={{ "--pulse-delay": `${index * 90}ms` }} key={index} />)}</div><strong>{isDropout ? "0 count" : `${Math.abs(encoderCount).toFixed(0)} count`}</strong></div>
     </div>
     <div className="preview-footer"><span>{isDropout ? "Command + current remain present while pulses pause." : "All three signals agree: the motor is moving."}</span><div className="preview-switch"><button className={!isDropout ? "selected" : ""} onClick={() => setMode("normal")}><span className="button-inner">Normal</span></button><button className={isDropout ? "selected" : ""} onClick={() => setMode("dropout")}><span className="button-inner">Dropout</span></button></div></div>
   </div>;
@@ -136,11 +182,11 @@ function InfoPage({ title, kicker, text }) {
   return <main className="page-view active react-page"><div className="page-heading"><div><span className="kicker">{kicker}</span><h1>{title}</h1><p>{text}</p></div></div>{isFeatures ? <><div className="feature-grid"><article className="large-feature"><span className="feature-icon">!</span><h2>Fault detection</h2><p>Correlates command above 10%, current above 0.8 A, and fewer than 3 pulses per second. This avoids treating a deliberately stopped motor as a fault.</p><span className="mini-label">Decision rule</span><strong>Intent + energy, missing feedback</strong></article><article className="large-feature"><span className="feature-icon">%</span><h2>Confidence scoring</h2><p>The score is a readable 0–100 indicator, not a probability or a safety certification. It helps operators compare samples and decide what to inspect next.</p><span className="mini-label">Example</span><strong>78 / 100 · possible dropout</strong></article><article className="large-feature"><span className="feature-icon">∿</span><h2>Virtual sensing</h2><p>When pulses disappear, the app can estimate movement from the last known pulse rate and elapsed time. Estimates are always labeled virtual, never measured.</p><span className="mini-label">Data boundary</span><strong>Measured signals stay separate</strong></article></div><div className="explain-panel"><div><span className="kicker">WHY IT HELPS</span><h2>Evidence before escalation.</h2><p>Use the score and signal relationship to distinguish a feedback problem from a normal stop, wiring issue, or low-load reading.</p></div><div className="logic-flow"><span>Command 80%</span><b>+</b><span>Current 6.4 A</span><b>→</b><strong>Check encoder</strong><b>→</b><span>0 pps = inspect</span></div></div></> : <><div className="process-grid"><article className="process-card"><span className="process-num">01</span><div className="signal-icon">↗</div><h2>Motor command</h2><p>The command is intent: a requested run, speed, or duty level. A high command means motion should be possible, but it does not prove the shaft moved.</p><span className="mini-label">Sample · 80%</span></article><article className="process-card"><span className="process-num">02</span><div className="signal-icon">≈</div><h2>Motor current</h2><p>Current is the energy witness. Sustained current while commanded suggests the drive and motor are engaged, even if feedback is missing.</p><span className="mini-label">Sample · 6.4 A</span></article><article className="process-card"><span className="process-num">03</span><div className="signal-icon">⌁</div><h2>Encoder pulses</h2><p>Pulses are the movement witness. Normal running produces a steady stream; a sudden gap or irregular pattern creates a mismatch.</p><span className="mini-label">Sample · 120 pps</span></article></div><div className="explain-panel"><div><span className="kicker">DROPOUT SIGNATURE</span><h2>What changes during a fault?</h2><p>Command and current remain present while encoder pulses fall to zero or become sporadic. A stopped motor has low command and low current, so it should not raise the same alert.</p></div><div className="comparison-table"><div><span>Normal run</span><strong>80% · 6.4 A · 120 pps</strong></div><div><span>Dropout</span><strong>80% · 6.4 A · 0 pps</strong></div><div><span>Stopped</span><strong>0% · 0.0 A · 0 pps</strong></div></div></div></>}</main>;
 }
 
-function Monitor({ scenario, setScenario, running, setRunning, takeSample, sample, assessment }) {
+function Monitor({ scenario, setScenario, running, setRunning, takeSample, sample, assessment, recordedData, dataError }) {
   const command = sample?.command || 0;
   const current = sample?.current || 0;
   const pulses = sample?.pps || 0;
-  return <main className="page-view active react-page"><div className="page-heading"><div><span className="kicker">LIVE MONITOR / SIMULATED READINGS</span><h1>Encoder health at a glance.</h1><p>Use the controls to run realistic sample data or trigger a dropout on demand.</p></div><span className={`state-badge ${assessment.fault ? "state-fault" : assessment.state === "Running" ? "state-normal" : "state-idle"}`}>{assessment.state}</span></div><div className="monitor-controls card"><div><span className="kicker">SIMULATION CONTROL</span><h2>{running ? "Streaming demo samples" : "Ready for a sample"}</h2><p>Every reading on this page is simulated; no physical motor is connected.</p></div><div className="control-actions"><select value={scenario} onChange={(event) => setScenario(event.target.value)}><option value="normal">Normal running</option><option value="dropout">Encoder dropout</option><option value="stopped">Motor stopped</option></select><button className="button button-primary" onClick={() => { setRunning(!running); if (!running) takeSample(); }}><span className="button-inner">{running ? "Stop simulation" : "Start simulation"}</span></button><button className="button button-secondary" onClick={takeSample}><span className="button-inner">Sample once</span></button></div></div><div className="monitor-grid"><article className={`card state-card ${assessment.fault ? "fault" : ""}`}><div className="card-top"><div><span className="kicker">CURRENT ASSESSMENT</span><h2>{assessment.title}</h2></div><span className={`chip ${assessment.fault ? "chip-fault" : "chip-neutral"}`}>{running ? "Streaming" : "Sampled"}</span></div><p>{assessment.fault ? "The motor is commanded and drawing current, but encoder feedback is absent or irregular." : sample?.command ? "Command, current, and encoder feedback are consistent with a normal run." : "Start a scenario to evaluate encoder health."}</p><div className="metric-stack"><div><span>Motor command</span><strong>{sample ? `${sample.command}%` : "—"}</strong></div><div><span>Motor current</span><strong>{sample ? `${sample.current.toFixed(1)} A` : "—"}</strong></div><div><span>Encoder pulses</span><strong>{sample ? `${sample.pps} pps` : "—"}</strong></div></div></article><article className="card confidence-card"><div className="card-top"><div><span className="kicker">FAULT CONFIDENCE</span><h2>Dropout likelihood</h2></div><strong className="confidence-value">{assessment.confidence}</strong></div><div className="confidence-track"><div style={{ width: `${assessment.confidence}%` }} /></div><div className="confidence-scale"><span>0 · clear</span><span>100 · likely dropout</span></div><p>Confidence is based on command, current, pulse absence, and pulse irregularity.</p><div className="confidence-guide"><span><b>0–39</b> normal or idle</span><span><b>40–69</b> inspect trend</span><span><b>70–100</b> possible dropout</span></div></article></div><div className="telemetry-grid"><TelemetryBar label="Command" value={command} max={100} unit="%" /><TelemetryBar label="Current" value={current} max={8} unit=" A" /><TelemetryBar label="Encoder" value={pulses} max={140} unit=" pps" /></div><div className="virtual-card card"><div><span className="kicker">VIRTUAL SENSING</span><h2>Movement estimate</h2><p>{assessment.fault ? "Encoder feedback is missing. The estimate below is virtual and should not be treated as measured position." : "A virtual estimate becomes useful when a recent measured pulse rate is available."}</p></div><strong>{sample && sample.command ? (assessment.fault ? "≈ 0.0 mm" : "≈ 12.4 mm") : "—"}</strong><span className="virtual-label">VIRTUAL ESTIMATE · NOT MEASURED</span></div></main>;
+  return <main className="page-view active react-page"><div className="page-heading"><div><span className="kicker">MONITOR / RECORDED + SIMULATED</span><h1>Encoder health at a glance.</h1><p>Normal mode uses recorded workbook samples. Dropout mode is simulated and removes encoder activity while command and current continue.</p></div><span className={`state-badge ${assessment.fault ? "state-fault" : assessment.state === "Running" ? "state-normal" : "state-idle"}`}>{assessment.state}</span></div><div className="monitor-controls card"><div><span className="kicker">DATA MODE</span><h2>{running ? "Streaming demo samples" : "Ready for a sample"}</h2><p>{dataError ? dataError : `Recorded rows loaded: ${recordedData.length}. No live motor connection.`}</p></div><div className="control-actions"><select value={scenario} onChange={(event) => setScenario(event.target.value)}><option value="normal">Recorded motor data</option><option value="dropout">Simulated encoder dropout</option><option value="stopped">Simulated motor stopped</option></select><button className="button button-primary" onClick={() => { setRunning(!running); if (!running) takeSample(); }}><span className="button-inner">{running ? "Stop simulation" : "Start simulation"}</span></button><button className="button button-secondary" onClick={takeSample}><span className="button-inner">Sample once</span></button></div></div><div className="monitor-grid"><article className={`card state-card ${assessment.fault ? "fault" : ""}`}><div className="card-top"><div><span className="kicker">CURRENT ASSESSMENT</span><h2>{assessment.title}</h2></div><span className={`chip ${assessment.fault ? "chip-fault" : "chip-neutral"}`}>{running ? "Streaming" : "Sampled"}</span></div><p>{assessment.fault ? "The motor command and current are retained while encoder feedback is simulated away." : sample?.command ? `${sample.dataSource || "Simulated data"} is consistent with this scenario.` : "Start a scenario to evaluate encoder health."}</p><div className="metric-stack"><div><span>Motor command</span><strong>{sample ? `${sample.command.toFixed(1)}%` : "—"}</strong></div><div><span>Motor current</span><strong>{sample ? `${sample.current.toFixed(2)} A` : "—"}</strong></div><div><span>Encoder activity</span><strong>{sample ? `${sample.encoderCount ?? sample.pps} count` : "—"}</strong></div></div></article><article className="card confidence-card"><div className="card-top"><div><span className="kicker">FAULT CONFIDENCE</span><h2>Dropout likelihood</h2></div><strong className="confidence-value">{assessment.confidence}</strong></div><div className="confidence-track"><div style={{ width: `${assessment.confidence}%` }} /></div><div className="confidence-scale"><span>0 · clear</span><span>100 · likely dropout</span></div><p>Confidence uses the recorded command/current context and simulated encoder loss.</p><div className="confidence-guide"><span><b>0–39</b> normal or idle</span><span><b>40–69</b> inspect trend</span><span><b>70–100</b> possible dropout</span></div></article></div><div className="telemetry-grid"><TelemetryBar label="PWM command" value={command} max={100} unit="%" /><TelemetryBar label="Current" value={current} max={8} unit=" A" /><TelemetryBar label="Encoder count" value={pulses} max={140} unit="" /></div><div className="virtual-card card"><div><span className="kicker">VIRTUAL SENSING</span><h2>Movement estimate</h2><p>{assessment.fault ? "Encoder activity has been removed by the simulated dropout mode. The estimate below is virtual and should not be treated as measured position." : "A virtual estimate is only a derived demonstration value; recorded encoderCount remains the measured source column."}</p></div><strong>{sample && sample.command ? (assessment.fault ? "≈ 0.0 mm" : "≈ 12.4 mm") : "—"}</strong><span className="virtual-label">VIRTUAL ESTIMATE · NOT MEASURED</span></div></main>;
 }
 
 function TelemetryBar({ label, value, max, unit }) {

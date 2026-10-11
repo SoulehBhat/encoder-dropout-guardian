@@ -16,6 +16,8 @@ The project makes that relationship visible through a responsive dark monitoring
 - A 0–100 confidence score for comparing simulated signal conditions.
 - Virtual movement estimates that are explicitly labeled as virtual, not measured encoder data.
 - Normal-running, encoder-dropout, and motor-stopped examples.
+- Recorded motor sample data loaded from `public/data/motor-data.csv`.
+- A separate simulated dropout mode that suppresses encoder activity without changing the recorded command/current context.
 - Session-local fault history.
 - Reduced-motion support and responsive layouts for desktop and mobile.
 
@@ -68,9 +70,9 @@ npm run preview
 ## Try the simulation
 
 1. Open **Live Monitor**.
-2. Choose **Normal running** and select **Sample once** to see consistent signals.
-3. Choose **Encoder dropout** and select **Sample once** to see command and current remain present while encoder pulses fall away.
-4. Choose **Motor stopped** to see why zero pulses alone are not a fault.
+2. Choose **Recorded motor data** and select **Sample once** to inspect readings from the bundled workbook sample.
+3. Choose **Simulated encoder dropout** and select **Sample once** to see command and current remain present while encoder activity is intentionally removed.
+4. Choose **Simulated motor stopped** to see why zero encoder activity alone is not a fault.
 5. Use **Start simulation** to stream samples at roughly 900 ms intervals.
 6. Open **Fault History** to review dropout events created during the browser session.
 
@@ -81,6 +83,19 @@ The current prototype rule treats a sample as a possible dropout when:
 - Encoder pulses are below 3 pulses per second.
 
 The confidence score is a monitoring aid, not a probability, safety certification, or replacement for electrical and mechanical diagnostics.
+
+## Recorded data and signal mapping
+
+The monitor loads a small representative sample exported from the `PRBS7-MotorA` trial in `MotorsData_rev.xlsx`. The file is bundled locally so the demo works without a network service or a connected motor. These readings are **recorded sample data, not live motor data**.
+
+| Monitor signal | Recorded column | Display behavior |
+| --- | --- | --- |
+| Command | `PWM` | Converted from the recorded 0–255 duty value to a percentage |
+| Current | `Current` | Displayed in amperes |
+| Encoder activity | `encoderCount` | Displayed as the recorded encoder count; `Velocity` is used as the activity-rate input for the normal-running assessment |
+| Sample status | `MotorStatus` | Retained in the CSV for context |
+
+The simulated dropout mode does not alter the recorded `PWM` or `Current` values. It intentionally sets encoder activity to zero so the mismatch is easy to observe. It is a demonstration mode only and does not control or communicate with a real motor.
 
 ## Login behavior
 

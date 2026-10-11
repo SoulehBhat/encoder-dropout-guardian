@@ -65,10 +65,10 @@ body { font-family: "DM Sans", "Aptos", "Segoe UI", Arial, sans-serif; }
 @media(max-width:480px){.header-actions{position:absolute;right:49px}}
 
 .login-page{display:flex;align-items:center;justify-content:center;min-height:calc(100vh - 150px);padding:52px 0 72px}
-.login-panel{width:min(100%,430px);padding:34px;border:1px solid #383838;border-radius:14px;background:rgba(16,16,16,.94);box-shadow:0 24px 70px rgba(0,0,0,.35)}
+.login-panel{width:min(100%,500px);margin:0 auto;padding:42px;border:1px solid #383838;border-radius:14px;background:rgba(16,16,16,.94);box-shadow:0 24px 70px rgba(0,0,0,.35)}
 .login-back-link{display:inline-block;margin-bottom:34px;color:#bdbdbd;font-size:.76rem;font-weight:700;transition:color .2s ease}
 .login-back-link:hover,.login-back-link:focus-visible{color:#fff;outline:none}
-.login-heading h1{margin:0 0 10px;color:#f4f4f4;font-size:clamp(2rem,6vw,2.7rem);letter-spacing:-.06em}
+.login-heading h1{margin:0 0 10px;color:#f4f4f4;font-size:clamp(2.35rem,6vw,3.2rem);letter-spacing:-.06em}
 .login-heading p{margin:0;color:#999;font-size:.82rem;line-height:1.6}
 .login-form{display:grid;gap:10px;margin-top:30px}
 .login-form label,.login-password-label{color:#d6d6d6;font-size:.73rem;font-weight:700}
@@ -107,4 +107,4 @@ button:not(.user-profile).selected .button-inner{color:#fff;background:#1a1a1a}
 .home-monitor-button{flex:0 1 auto!important;width:auto!important;min-width:220px!important;height:62px!important;padding:0 9px!important;font-size:1rem!important}
 .home-monitor-button .button-inner{width:auto!important;height:58px!important;padding:0 24px!important;font-size:1rem!important;font-weight:700!important}
 @media(max-width:480px){.home-monitor-button{width:100%!important;min-width:0!important}.home-monitor-button .button-inner{width:100%!important}}
-@media(max-width:480px){.login-panel{padding:27px 20px}.login-page{align-items:flex-start;padding-top:30px}}
+@media(max-width:480px){.login-panel{width:100%;padding:30px 20px}.login-page{align-items:flex-start;padding-top:30px}.login-heading h1{font-size:2.35rem}}
